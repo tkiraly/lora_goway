@@ -156,7 +156,7 @@ func lbt_is_channel_free(c *os.File, spi_mux_mode, spi_mux_target byte, pkt_data
 			for i := byte(0); i < (s.lbt_nb_active_channel - 1); i++ {
 				if (pkt_data.freq_hz == (s.lbt_channel_cfg[i].freq_hz+s.lbt_channel_cfg[i+1].freq_hz)/2) &&
 					((s.lbt_channel_cfg[i+1].freq_hz - s.lbt_channel_cfg[i].freq_hz) == 200E3) {
-					log.Printf("LBT: select channels %d,%d (%u Hz)\n", i, i+1, (s.lbt_channel_cfg[i].freq_hz+s.lbt_channel_cfg[i+1].freq_hz)/2)
+					log.Printf("LBT: select channels %d,%d (%d Hz)\n", i, i+1, (s.lbt_channel_cfg[i].freq_hz+s.lbt_channel_cfg[i+1].freq_hz)/2)
 					lbt_channel_decod_1 = int(i)
 					lbt_channel_decod_2 = int(i) + 1
 					if s.lbt_channel_cfg[i].scan_time_us == 5000 {

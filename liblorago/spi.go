@@ -115,7 +115,7 @@ func Lgw_spi_w(file *os.File, spi_mux_mode, spi_mux_target, address, data byte) 
 	write := make([]byte, 0)
 
 	if (address & 0x80) != 0 {
-		fmt.Print("WARNING: SPI address > 127\n")
+		log.Print("WARNING: SPI address > 127\n")
 	}
 
 	if spi_mux_mode == LGW_SPI_MUX_MODE1 {
@@ -146,7 +146,7 @@ func Lgw_spi_r(file *os.File, spi_mux_mode, spi_mux_target, address byte) (byte,
 	write := make([]byte, 0)
 
 	if (address & 0x80) != 0 {
-		fmt.Print("WARNING: SPI address > 127\n")
+		log.Print("WARNING: SPI address > 127\n")
 	}
 
 	if spi_mux_mode == LGW_SPI_MUX_MODE1 {
@@ -178,7 +178,7 @@ func Lgw_spi_r(file *os.File, spi_mux_mode, spi_mux_target, address byte) (byte,
 func Lgw_spi_wb(file *os.File, spi_mux_mode, spi_mux_target, address byte, data []byte) error {
 	write := make([]byte, 0)
 	if (address & 0x80) != 0 {
-		fmt.Print("WARNING: SPI address > 127\n")
+		log.Print("WARNING: SPI address > 127\n")
 	}
 	if spi_mux_mode == LGW_SPI_MUX_MODE1 {
 		write = append(write, []byte{0, 0}...)
@@ -222,7 +222,7 @@ func Lgw_spi_rb(file *os.File, spi_mux_mode, spi_mux_target, address byte, size 
 	write := make([]byte, 0)
 
 	if (address & 0x80) != 0 {
-		fmt.Print("WARNING: SPI address > 127\n")
+		log.Print("WARNING: SPI address > 127\n")
 	}
 
 	if spi_mux_mode == LGW_SPI_MUX_MODE1 {

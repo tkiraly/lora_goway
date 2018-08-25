@@ -854,7 +854,7 @@ func Lgw_setup_sx125x(c *os.File, lgw_spi_mux_mode, spi_mux_target, rf_chain, rf
 	if err != nil {
 		return err
 	}
-	fmt.Print("Note: SX125x #%d version register returned 0x%02X\n", rf_chain, b)
+	log.Printf("Note: SX125x #%d version register returned 0x%X\n", rf_chain, b)
 
 	/* General radio setup */
 	if rf_clkout == rf_chain {

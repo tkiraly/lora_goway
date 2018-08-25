@@ -800,7 +800,7 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, error) {
 	}
 
 	/* Wait for calibration to end */
-	fmt.Printf("Note: calibration started (time: %d ms)\n", cal_time)
+	log.Printf("Note: calibration started (time: %d ms)\n", cal_time)
 	time.Sleep(time.Duration(cal_time) * time.Millisecond)                                 /* Wait for end of calibration */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_EMERGENCY_FORCE_HOST_CTRL, 1) /* Take back control */
 	if err != nil {
@@ -826,7 +826,7 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, error) {
 	if (cal_status & 0x81) != 0x81 {
 		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: CALIBRATION FAILURE (STATUS = %d)", cal_status)
 	} else {
-		fmt.Printf("Note: calibration finished (status = %d)\n", cal_status)
+		log.Printf("Note: calibration finished (status = %d)\n", cal_status)
 	}
 	if s.rf_enable[0] && ((cal_status & 0x02) == 0) {
 		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: calibration could not access radio A")
@@ -1410,7 +1410,7 @@ func Lgw_receive(c *os.File, spi_mux_mode, spi_mux_target byte, max_pkt uint8, s
 			return nil, fmt.Errorf("WARNING: %d = INVALID NUMBER OF PACKETS TO FETCH, ABORTING", buff[0])
 		}
 
-		//fmt.Printf("FIFO content: %d %d %d %d %d\n", buff[0], buff[1], buff[2], buff[3], buff[4])
+		//log.Printf("FIFO content: %d %d %d %d %d\n", buff[0], buff[1], buff[2], buff[3], buff[4])
 		pkt_data[nb_pkt_fetch].Size = uint16(buff[4])
 		sz := pkt_data[nb_pkt_fetch].Size
 		stat_fifo := buff[3] /* will be used later, need to save it before overwriting buff */

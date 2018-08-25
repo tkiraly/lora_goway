@@ -811,7 +811,7 @@ func Lgw_connect(path string, spi_only bool, tx_notch_freq uint32) (*os.File, by
 			lgw_spi_mux_mode = LGW_SPI_MUX_MODE0
 			lgw_spi_mux_target = LGW_SPI_MUX_TARGET_SX1301
 		} else {
-			fmt.Printf("INFO: detected FPGA with SPI mux header (v%d)\n", u)
+			log.Printf("INFO: detected FPGA with SPI mux header (v%d)\n", u)
 			lgw_spi_mux_mode = LGW_SPI_MUX_MODE1
 			lgw_spi_mux_target = LGW_SPI_MUX_TARGET_FPGA
 			/* FPGA Soft Reset */
@@ -841,7 +841,7 @@ func Lgw_connect(path string, spi_only bool, tx_notch_freq uint32) (*os.File, by
 		}
 	}
 
-	fmt.Printf("Note: success connecting the concentrator\n")
+	log.Printf("Note: success connecting the concentrator\n")
 	return c, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, nil
 }
 
@@ -867,7 +867,7 @@ func Lgw_reg_check(c *os.File, spi_mux_mode, spi_mux_target byte) error {
 	ok_msg := "+++MATCH+++"
 	notok_msg := "###MISMATCH###"
 
-	fmt.Print("Start of register verification\n")
+	log.Print("Start of register verification\n")
 	for i := uint16(0); i < LGW_TOTALREGS; i++ {
 		r = loregs[i]
 		read_value, err := Lgw_reg_r(c, spi_mux_mode, spi_mux_target, uint16(i))
@@ -881,12 +881,12 @@ func Lgw_reg_check(c *os.File, spi_mux_mode, spi_mux_target byte) error {
 			ptr = notok_msg
 		}
 		if r.sign == 1 {
-			fmt.Printf("%s reg number %d read: %d (%X) default: %d (%X)\n", ptr, i, read_value, read_value, r.dflt, r.dflt)
+			log.Printf("%s reg number %d read: %d (%X) default: %d (%X)\n", ptr, i, read_value, read_value, r.dflt, r.dflt)
 		} else {
-			fmt.Printf("%s reg number %d read: %d (%X) default: %d (%X)\n", ptr, i, read_value, read_value, r.dflt, r.dflt)
+			log.Printf("%s reg number %d read: %d (%X) default: %d (%X)\n", ptr, i, read_value, read_value, r.dflt, r.dflt)
 		}
 	}
-	fmt.Print("End of register verification\n")
+	log.Print("End of register verification\n")
 
 	return nil
 }

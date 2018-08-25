@@ -2,6 +2,7 @@ package liblorago
 
 import (
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -112,24 +113,24 @@ func Lgw_fpga_configure(f *os.File, tx_notch_freq uint32) (bool, bool, bool, byt
 	}
 
 	/* Get supported FPGA features */
-	fmt.Printf("INFO: FPGA supported features:")
+	log.Printf("INFO: FPGA supported features:")
 	val, err := Lgw_fpga_reg_r(f, LGW_FPGA_FEATURE)
 	if err != nil {
 		return false, false, false, tx_notch_offset, err
 	}
 	tx_notch_support := TAKE_N_BITS_FROM(byte(val), 0, 1) == 1
 	if tx_notch_support {
-		fmt.Printf(" [TX filter] ")
+		log.Printf(" [TX filter] ")
 	}
 	spectral_scan_support := TAKE_N_BITS_FROM(byte(val), 1, 1) == 1
 	if spectral_scan_support {
-		fmt.Printf(" [Spectral Scan] ")
+		log.Printf(" [Spectral Scan] ")
 	}
 	lbt_support := TAKE_N_BITS_FROM(byte(val), 2, 1) == 1
 	if lbt_support {
-		fmt.Printf(" [LBT] ")
+		log.Printf(" [LBT] ")
 	}
-	fmt.Printf("\n")
+	log.Printf("\n")
 
 	err0 := Lgw_fpga_reg_w(f, LGW_FPGA_CTRL_INPUT_SYNC_I, 1)
 	err1 := Lgw_fpga_reg_w(f, LGW_FPGA_CTRL_INPUT_SYNC_Q, 1)
@@ -159,7 +160,7 @@ func Lgw_fpga_configure(f *os.File, tx_notch_freq uint32) (bool, bool, bool, byt
 		if byte(val) != tx_notch_offset {
 			return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("WARNING: TX notch filter frequency is not programmable (check your FPGA image)")
 		}
-		fmt.Printf("INFO: TX notch filter frequency set to %d (%d)\n", tx_notch_freq, tx_notch_offset)
+		log.Printf("INFO: TX notch filter frequency set to %d (%d)\n", tx_notch_freq, tx_notch_offset)
 	}
 
 	return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, nil
