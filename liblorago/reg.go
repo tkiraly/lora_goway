@@ -784,16 +784,17 @@ func reg_r_align32(c *os.File, spi_mux_mode, spi_mux_target byte, r Lgw_reg_s) (
 	}
 }
 
-func Lgw_connect(path string, spi_only bool, tx_notch_freq uint32) (*os.File, byte, byte, bool, bool, bool, error) {
+func Lgw_connect(path string, spi_only bool, tx_notch_freq uint32) (*os.File, byte, byte, bool, bool, bool, byte, error) {
 	/* open the SPI link */
 	tx_notch_support := false
 	spectral_scan_support := false
+	tx_notch_offset := byte(0)
 	lbt_support := false
 	lgw_spi_mux_mode := byte(0)
 	lgw_spi_mux_target := byte(0)
 	c, err := Lgw_spi_open(path)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, err
 	}
 
 	if spi_only == false {
@@ -801,7 +802,7 @@ func Lgw_connect(path string, spi_only bool, tx_notch_freq uint32) (*os.File, by
 		/* First, we assume there is an FPGA, and try to read its version */
 		u, err := Lgw_spi_r(c, LGW_SPI_MUX_MODE1, LGW_SPI_MUX_TARGET_FPGA, loregs[LGW_VERSION].addr)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, err
 		}
 
 		if check_fpga_version(u) != true {
@@ -817,31 +818,31 @@ func Lgw_connect(path string, spi_only bool, tx_notch_freq uint32) (*os.File, by
 			Lgw_spi_w(c, lgw_spi_mux_mode, LGW_SPI_MUX_TARGET_FPGA, 0, 1)
 			Lgw_spi_w(c, lgw_spi_mux_mode, LGW_SPI_MUX_TARGET_FPGA, 0, 0)
 			/* FPGA configure */
-			tx_notch_support, spectral_scan_support, lbt_support, err = Lgw_fpga_configure(c, tx_notch_freq)
+			tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, err = Lgw_fpga_configure(c, tx_notch_freq)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, err
 			}
-			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, err
 		}
 
 		/* check SX1301 version */
 		u, err = Lgw_spi_r(c, lgw_spi_mux_mode, LGW_SPI_MUX_TARGET_SX1301, loregs[LGW_VERSION].addr)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR READING CHIP VERSION REGISTER")
+			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("ERROR READING CHIP VERSION REGISTER")
 		}
 		if u != byte(loregs[LGW_VERSION].dflt) {
-			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: NOT EXPECTED CHIP VERSION (v%d)", u)
+			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("ERROR: NOT EXPECTED CHIP VERSION (v%d)", u)
 		}
 
 		/* write 0 to the page/reset register */
 		err = Lgw_spi_w(c, lgw_spi_mux_mode, LGW_SPI_MUX_TARGET_SX1301, loregs[LGW_PAGE_REG].addr, 0)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR WRITING PAGE REGISTER")
+			return nil, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("ERROR WRITING PAGE REGISTER")
 		}
 	}
 
 	fmt.Printf("Note: success connecting the concentrator\n")
-	return c, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, nil
+	return c, lgw_spi_mux_mode, lgw_spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, nil
 }
 
 func Lgw_disconnect(f *os.File) error {

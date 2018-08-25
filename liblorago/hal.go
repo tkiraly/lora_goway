@@ -627,71 +627,71 @@ func lgw_get_tx_start_delay(tx_notch_support, tx_notch_enable bool, tx_notch_off
 	return uint16(tx_start_delay) /* keep truncating instead of rounding: better behaviour measured */
 }
 
-func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, error) {
+func Lgw_start(path string, s *State) (*os.File, byte, byte, error) {
 	e := s.rf_tx_enable[1]
 	index := 0
 	if e {
 		index = 1
 	}
-	f, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err := Lgw_connect(path, false, s.rf_tx_notch_freq[index])
+	f, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, err := Lgw_connect(path, false, s.rf_tx_notch_freq[index])
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: FAIL TO CONNECT BOARD")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: FAIL TO CONNECT BOARD")
 	}
 
 	/* reset the registers (also shuts the radios down) */
 	err = Lgw_soft_reset(f, lgw_spi_mux_mode)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* gate clocks */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_GLOBAL_EN, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CLK32M_EN, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* switch on and reset the radios (also starts the 32 MHz XTAL) */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_A_EN, 1)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_B_EN, 1)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(500 * time.Millisecond) /* TODO: optimize */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_RST, 1)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(5 * time.Millisecond)
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_RST, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* setup the radios */
 	err = Lgw_setup_sx125x(f, lgw_spi_mux_mode, spi_mux_target, 0, s.rf_clkout, s.rf_enable[0], s.rf_radio_type[0], s.rf_rx_freq[0])
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Failed to setup sx125x radio for RF chain 0")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: Failed to setup sx125x radio for RF chain 0")
 	}
 	err = Lgw_setup_sx125x(f, lgw_spi_mux_mode, spi_mux_target, 1, s.rf_clkout, s.rf_enable[1], s.rf_radio_type[1], s.rf_rx_freq[1])
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Failed to setup sx125x radio for RF chain 1")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: Failed to setup sx125x radio for RF chain 1")
 	}
 
 	/* gives AGC control of GPIOs to enable Tx external digital filter */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_GPIO_MODE, 31) /* Set all GPIOs as output */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_GPIO_SELECT_OUTPUT, 2)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	//TODO: ezt befejezni
 	///* Configure LBT */
@@ -715,11 +715,11 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	/* Enable clocks */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_GLOBAL_EN, 1)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CLK32M_EN, 1)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* GPIOs table :
@@ -752,7 +752,7 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	case LGW_RADIO_TYPE_SX1257:
 		cal_cmd |= 0x00 /* Bit 5: 0: SX1257, 1: SX1255 */
 	default:
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: UNEXPECTED VALUE %d FOR RADIO TYPE", s.rf_radio_type[0])
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: UNEXPECTED VALUE %d FOR RADIO TYPE", s.rf_radio_type[0])
 	}
 
 	cal_cmd |= 0x00  /* Bit 6-7: Board type 0: ref, 1: FPGA, 3: board X */
@@ -761,42 +761,42 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	/* Load the calibration firmware  */
 	err = load_firmware(f, MCU_AGC, lgw_spi_mux_mode, spi_mux_target, cal_firmware)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FORCE_HOST_RADIO_CTRL, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	} /* gives to AGC MCU the control of the radios */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, int32(cal_cmd)) /* send calibration configuration word */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_RST_1, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* Check firmware version */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_ADDR, FW_VERSION_ADDR)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	read_val, err := Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_DATA)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	fw_version := uint8(read_val)
 	if fw_version != FW_VERSION_CAL {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Version of calibration firmware not expected, actual:%d expected:%d", fw_version, FW_VERSION_CAL)
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: Version of calibration firmware not expected, actual:%d expected:%d", fw_version, FW_VERSION_CAL)
 	}
 
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_PAGE_REG, 3) /* Calibration will start on this condition as soon as MCU can talk to concentrator registers */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_EMERGENCY_FORCE_HOST_CTRL, 0) /* Give control of concentrator registers to MCU */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* Wait for calibration to end */
@@ -804,13 +804,13 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	time.Sleep(time.Duration(cal_time) * time.Millisecond)                                 /* Wait for end of calibration */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_EMERGENCY_FORCE_HOST_CTRL, 1) /* Take back control */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* Get calibration status */
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	cal_status := uint8(read_val)
 	/*
@@ -824,65 +824,65 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	   bit 6: radio B TX DC Offset correction successful
 	*/
 	if (cal_status & 0x81) != 0x81 {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: CALIBRATION FAILURE (STATUS = %d)", cal_status)
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: CALIBRATION FAILURE (STATUS = %d)", cal_status)
 	} else {
 		fmt.Printf("Note: calibration finished (status = %d)\n", cal_status)
 	}
 	if s.rf_enable[0] && ((cal_status & 0x02) == 0) {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: calibration could not access radio A")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: calibration could not access radio A")
 	}
 	if s.rf_enable[1] && ((cal_status & 0x04) == 0) {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: calibration could not access radio B")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: calibration could not access radio B")
 	}
 	if s.rf_enable[0] && ((cal_status & 0x08) == 0) {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: problem in calibration of radio A for image rejection")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: problem in calibration of radio A for image rejection")
 	}
 	if s.rf_enable[1] && ((cal_status & 0x10) == 0) {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: problem in calibration of radio B for image rejection")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: problem in calibration of radio B for image rejection")
 	}
 	if s.rf_enable[0] && s.rf_tx_enable[0] && ((cal_status & 0x20) == 0) {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: problem in calibration of radio A for TX DC offset")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: problem in calibration of radio A for TX DC offset")
 	}
 	if s.rf_enable[1] && s.rf_tx_enable[1] && ((cal_status & 0x40) == 0) {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: problem in calibration of radio B for TX DC offset")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("WARNING: problem in calibration of radio B for TX DC offset")
 	}
 
 	/* Get TX DC offset values */
 	for i := 0; i <= 7; i++ {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_ADDR, int32(0xA0+i))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_DATA)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		s.cal_offset_a_i[i] = int8(read_val)
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_ADDR, int32(0xA8+i))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_DATA)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		s.cal_offset_a_q[i] = int8(read_val)
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_ADDR, int32(0xB0+i))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_DATA)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		s.cal_offset_b_i[i] = int8(read_val)
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_ADDR, int32(0xB8+i))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_DATA)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		s.cal_offset_b_q[i] = int8(read_val)
 	}
@@ -890,12 +890,12 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	/* load adjusted parameters */
 	err = lgw_constant_adjust(f, lgw_spi_mux_mode, spi_mux_target, s)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* Sanity check for RX frequency */
 	if s.rf_rx_freq[0] == 0 {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: wrong configuration, rf_rx_freq[0] is not set")
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: wrong configuration, rf_rx_freq[0] is not set")
 	}
 
 	/* Freq-to-time-drift calculation */
@@ -905,7 +905,7 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FREQ_TO_TIME_DRIFT, int32(x)) /* default 9 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	x = 4096000000 / (s.rf_rx_freq[0] >> 3) /* dividend: (16*2048*1000000) >> 3, rescaled to avoid 32b overflow */
@@ -914,7 +914,7 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_FREQ_TO_TIME_DRIFT, int32(x)) /* default 36 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* configure LoRa 'multi' demodulators aka. LoRa 'sensor' channels (IF0-3) */
@@ -933,35 +933,35 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_0, IF_HZ_TO_REG(s.if_freq[0])) /* default -384 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_1, IF_HZ_TO_REG(s.if_freq[1])) /* default -128 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_2, IF_HZ_TO_REG(s.if_freq[2])) /* default 128 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_3, IF_HZ_TO_REG(s.if_freq[3])) /* default 384 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_4, IF_HZ_TO_REG(s.if_freq[4])) /* default -384 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_5, IF_HZ_TO_REG(s.if_freq[5])) /* default -128 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_6, IF_HZ_TO_REG(s.if_freq[6])) /* default 128 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_7, IF_HZ_TO_REG(s.if_freq[7])) /* default 384 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	var corr int32
@@ -970,130 +970,130 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR0_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[1] {
 		corr = int32(s.lora_multi_sfmask[1])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR1_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[2] {
 		corr = int32(s.lora_multi_sfmask[2])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR2_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[3] {
 		corr = int32(s.lora_multi_sfmask[3])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR3_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[4] {
 		corr = int32(s.lora_multi_sfmask[4])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR4_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[5] {
 		corr = int32(s.lora_multi_sfmask[5])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR5_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[6] {
 		corr = int32(s.lora_multi_sfmask[6])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR6_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[7] {
 		corr = int32(s.lora_multi_sfmask[7])
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CORR7_DETECT_EN, corr) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_PPM_OFFSET, 0x60) /* as the threshold is 16ms, use 0x60 to enable ppm_offset for SF12 and SF11 @125kHz*/
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_CONCENTRATOR_MODEM_ENABLE, 1) /* default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* configure LoRa 'stand-alone' modem (IF8) */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_8, IF_HZ_TO_REG(s.if_freq[8])) /* MBWSSF modem (default 0) */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[8] == true {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RADIO_SELECT, int32(s.if_rf_chain[8]))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		switch s.lora_rx_bw {
 		case BW_125KHZ:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_MODEM_BW, 0)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case BW_250KHZ:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_MODEM_BW, 1)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case BW_500KHZ:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_MODEM_BW, 2)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		default:
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT", s.lora_rx_bw)
+			return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT", s.lora_rx_bw)
 		}
 		switch s.lora_rx_sf {
 		case DR_LORA_SF7:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RATE_SF, 7)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case DR_LORA_SF8:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RATE_SF, 8)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case DR_LORA_SF9:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RATE_SF, 9)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case DR_LORA_SF10:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RATE_SF, 10)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case DR_LORA_SF11:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RATE_SF, 11)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		case DR_LORA_SF12:
 			err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_RATE_SF, 12)
 			if err != nil {
-				return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+				return nil, lgw_spi_mux_mode, spi_mux_target, err
 			}
 		default:
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT", s.lora_rx_sf)
+			return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT", s.lora_rx_sf)
 		}
 		var offset int32
 		if s.lora_rx_ppm_offset {
@@ -1101,127 +1101,127 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 		}
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_PPM_OFFSET, offset) /* default 0 */
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_MODEM_ENABLE, 1) /* default 0 */
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 	} else {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MBWSSF_MODEM_ENABLE, 0)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 	}
 
 	/* configure FSK modem (IF9) */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_IF_FREQ_9, IF_HZ_TO_REG(s.if_freq[9])) /* FSK modem, default 0 */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_PSIZE, int32(s.fsk_sync_word_size-1))
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_TX_PSIZE, int32(s.fsk_sync_word_size-1))
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	fsk_sync_word_reg := s.fsk_sync_word << (8 * (8 - s.fsk_sync_word_size))
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_REF_PATTERN_LSB, int32(0xFFFFFFFF&fsk_sync_word_reg))
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_REF_PATTERN_MSB, int32(0xFFFFFFFF&(fsk_sync_word_reg>>32)))
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if s.if_enable[9] {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_RADIO_SELECT, int32(s.if_rf_chain[9]))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_BR_RATIO, int32(LGW_XTAL_FREQU/s.fsk_rx_dr)) /* setting the dividing ratio for datarate */
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_CH_BW_EXPO, int32(s.fsk_rx_bw))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_MODEM_ENABLE, 1) /* default 0 */
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 	} else {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FSK_MODEM_ENABLE, 0)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 	}
 
 	/* Load firmware */
 	err = load_firmware(f, MCU_ARB, lgw_spi_mux_mode, spi_mux_target, arb_firmware)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = load_firmware(f, MCU_AGC, lgw_spi_mux_mode, spi_mux_target, agc_firmware)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* gives the AGC MCU control over radio, RF front-end and filter gain */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FORCE_HOST_RADIO_CTRL, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FORCE_HOST_FE_CTRL, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_FORCE_DEC_FILTER_GAIN, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* Get MCUs out of reset */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, 0) /* MUST not be = to 1 or 2 at firmware init */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_RST_0, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_RST_1, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* Check firmware version */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_ADDR, FW_VERSION_ADDR)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_AGC_MCU_RAM_DATA)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	fw_version = uint8(read_val)
 	if fw_version != FW_VERSION_AGC {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Version of AGC firmware not expected, actual:%d expected:%d", fw_version, FW_VERSION_AGC)
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: Version of AGC firmware not expected, actual:%d expected:%d", fw_version, FW_VERSION_AGC)
 	}
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_ARB_MCU_RAM_ADDR, FW_VERSION_ADDR)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_DBG_ARB_MCU_RAM_DATA)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	fw_version = uint8(read_val)
 	if fw_version != FW_VERSION_ARB {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Version of arbiter firmware not expected, actual:%d expected:%d", fw_version, FW_VERSION_ARB)
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: Version of arbiter firmware not expected, actual:%d expected:%d", fw_version, FW_VERSION_ARB)
 	}
 
 	log.Printf("Info: Initialising AGC firmware...\n")
@@ -1229,117 +1229,117 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if read_val != 0x10 {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
 	}
 
 	/* Update Tx gain LUT and start AGC */
 	for i := uint8(0); i < s.txgain_lut.size; i++ {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, AGC_CMD_WAIT) /* start a transaction */
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		time.Sleep(1 * time.Millisecond)
 		load_val := s.txgain_lut.lut[i].mix_gain + (16 * s.txgain_lut.lut[i].dac_gain) + (64 * s.txgain_lut.lut[i].pa_gain)
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, int32(load_val))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		time.Sleep(1 * time.Millisecond)
 		read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		if read_val != (0x30 + int32(i)) {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
+			return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
 		}
 	}
 	/* As the AGC fw is waiting for 16 entries, we need to abort the transaction if we get less entries */
 	if s.txgain_lut.size < TX_GAIN_LUT_SIZE_MAX {
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, AGC_CMD_WAIT)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		time.Sleep(1 * time.Millisecond)
 		load_val := AGC_CMD_ABORT
 		err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, int32(load_val))
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		time.Sleep(1 * time.Millisecond)
 		read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 		if err != nil {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+			return nil, lgw_spi_mux_mode, spi_mux_target, err
 		}
 		if read_val != 0x30 {
-			return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
+			return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
 		}
 	}
 
 	/* Load Tx freq MSBs (always 3 if f > 768 for SX1257 or f > 384 for SX1255 */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, AGC_CMD_WAIT)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(1 * time.Millisecond)
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, 3)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(1 * time.Millisecond)
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if read_val != 0x33 {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
 	}
 
 	/* Load chan_select firmware option */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, AGC_CMD_WAIT)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(1 * time.Millisecond)
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, 0)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(1 * time.Millisecond)
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if read_val != 0x30 {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
 	}
 
 	/* End AGC firmware init and check status */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, AGC_CMD_WAIT)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(1 * time.Millisecond)
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_RADIO_SELECT, int32(radio_select)) /* Load intended value of RADIO_SELECT */
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	time.Sleep(1 * time.Millisecond)
 	log.Printf("Info: putting back original RADIO_SELECT value\n")
 	read_val, err = Lgw_reg_r(f, lgw_spi_mux_mode, spi_mux_target, LGW_MCU_AGC_STATUS)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 	if read_val != 0x40 {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
+		return nil, lgw_spi_mux_mode, spi_mux_target, fmt.Errorf("ERROR: AGC FIRMWARE INITIALIZATION FAILURE, STATUS 0x%X", uint8(read_val))
 	}
 
 	/* enable GPS event capture */
 	err = Lgw_reg_w(f, lgw_spi_mux_mode, spi_mux_target, LGW_GPS_EN, 1)
 	if err != nil {
-		return nil, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, err
+		return nil, lgw_spi_mux_mode, spi_mux_target, err
 	}
 
 	/* */
@@ -1349,7 +1349,12 @@ func Lgw_start(path string, s *State) (*os.File, byte, byte, bool, bool, bool, e
 	//	wait_ms(8400)
 	//}
 
-	return f, lgw_spi_mux_mode, spi_mux_target, tx_notch_support, spectral_scan_support, lbt_support, nil
+	s.tx_notch_support = tx_notch_support
+	s.spectral_scan_support = spectral_scan_support
+	s.lbt_support = lbt_support
+	s.tx_notch_offset = tx_notch_offset
+
+	return f, lgw_spi_mux_mode, spi_mux_target, nil
 }
 
 func Lgw_stop(f *os.File, lgw_spi_mux_mode byte) error {

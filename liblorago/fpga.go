@@ -104,19 +104,18 @@ func lgw_fpga_get_tx_notch_delay(tx_notch_support bool, tx_notch_offset byte) fl
 }
 
 //returns tx_notch_support,spectral_scan_support,lbt_support
-func Lgw_fpga_configure(f *os.File, tx_notch_freq uint32) (bool, bool, bool, error) {
-
+func Lgw_fpga_configure(f *os.File, tx_notch_freq uint32) (bool, bool, bool, byte, error) {
+	tx_notch_offset := byte(0)
 	/* Check input parameters */
 	if (tx_notch_freq < LGW_MIN_NOTCH_FREQ) || (tx_notch_freq > LGW_MAX_NOTCH_FREQ) {
-		return false, false, false, fmt.Errorf("WARNING: FPGA TX notch frequency is out of range (%d - [%d..%d]), setting it to default (%d)", tx_notch_freq, LGW_MIN_NOTCH_FREQ, LGW_MAX_NOTCH_FREQ, LGW_DEFAULT_NOTCH_FREQ)
-		tx_notch_freq = LGW_DEFAULT_NOTCH_FREQ
+		return false, false, false, tx_notch_offset, fmt.Errorf("WARNING: FPGA TX notch frequency is out of range (%d - [%d..%d]), setting it to default (%d)", tx_notch_freq, LGW_MIN_NOTCH_FREQ, LGW_MAX_NOTCH_FREQ, LGW_DEFAULT_NOTCH_FREQ)
 	}
 
 	/* Get supported FPGA features */
 	fmt.Printf("INFO: FPGA supported features:")
 	val, err := Lgw_fpga_reg_r(f, LGW_FPGA_FEATURE)
 	if err != nil {
-		return false, false, false, err
+		return false, false, false, tx_notch_offset, err
 	}
 	tx_notch_support := TAKE_N_BITS_FROM(byte(val), 0, 1) == 1
 	if tx_notch_support {
@@ -136,34 +135,34 @@ func Lgw_fpga_configure(f *os.File, tx_notch_freq uint32) (bool, bool, bool, err
 	err1 := Lgw_fpga_reg_w(f, LGW_FPGA_CTRL_INPUT_SYNC_Q, 1)
 	err2 := Lgw_fpga_reg_w(f, LGW_FPGA_CTRL_OUTPUT_SYNC, 0)
 	if err0 != nil || err1 != nil || err2 != nil {
-		return tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Failed to configure FPGA TX synchro")
+		return tx_notch_support, spectral_scan_support, lbt_support, 0, fmt.Errorf("ERROR: Failed to configure FPGA TX synchro")
 	}
 	/* Required for Semtech AP2 reference design */
 	err = Lgw_fpga_reg_w(f, LGW_FPGA_CTRL_INVERT_IQ, 1)
 	if err != nil {
-		return tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Failed to configure FPGA polarity")
+		return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("ERROR: Failed to configure FPGA polarity")
 	}
 
 	/* Configure TX notch filter */
 	if tx_notch_support {
-		tx_notch_offset := int32((32E6 / (2 * tx_notch_freq)) - 64)
-		err := Lgw_fpga_reg_w(f, LGW_FPGA_NOTCH_FREQ_OFFSET, tx_notch_offset)
+		tx_notch_offset := byte((32E6 / (2 * tx_notch_freq)) - 64)
+		err := Lgw_fpga_reg_w(f, LGW_FPGA_NOTCH_FREQ_OFFSET, int32(tx_notch_offset))
 		if err != nil {
-			return tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Failed to configure FPGA TX notch filter")
+			return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("ERROR: Failed to configure FPGA TX notch filter")
 		}
 
 		/* Readback to check that notch frequency is programmable */
 		val, err := Lgw_fpga_reg_r(f, LGW_FPGA_NOTCH_FREQ_OFFSET)
 		if err != nil {
-			return tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("ERROR: Failed to read FPGA TX notch frequency")
+			return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("ERROR: Failed to read FPGA TX notch frequency")
 		}
-		if val != tx_notch_offset {
-			return tx_notch_support, spectral_scan_support, lbt_support, fmt.Errorf("WARNING: TX notch filter frequency is not programmable (check your FPGA image)")
+		if byte(val) != tx_notch_offset {
+			return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, fmt.Errorf("WARNING: TX notch filter frequency is not programmable (check your FPGA image)")
 		}
 		fmt.Printf("INFO: TX notch filter frequency set to %d (%d)\n", tx_notch_freq, tx_notch_offset)
 	}
 
-	return tx_notch_support, spectral_scan_support, lbt_support, nil
+	return tx_notch_support, spectral_scan_support, lbt_support, tx_notch_offset, nil
 }
 
 /* Write to a register addressed by name */
