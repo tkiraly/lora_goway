@@ -1602,6 +1602,367 @@ func Lgw_receive(c *os.File, spi_mux_mode, spi_mux_target byte, max_pkt uint8, s
 	return pkt_data, nil
 }
 
+func Lgw_send(c *os.File, spi_mux_mode, spi_mux_target byte, pkt_data Lgw_pkt_tx_s, s *State) error {
+	buff := make([]byte, 256+TX_METADATA_NB)
+	//int i, x;
+	//uint8_t buff[256+TX_METADATA_NB]; /* buffer to prepare the packet to send + metadata before SPI write burst */
+	//uint32_t part_int = 0; /* integer part for PLL register value calculation */
+	//uint32_t part_frac = 0; /* fractional part for PLL register value calculation */
+	//uint16_t fsk_dr_div; /* divider to configure for target datarate */
+	//int transfer_size = 0; /* data to transfer from host to TX databuffer */
+	//int payload_offset = 0; /* start of the payload content in the databuffer */
+	//uint8_t pow_index = 0; /* 4-bit value to set the firmware TX power */
+	//uint8_t target_mix_gain = 0; /* used to select the proper I/Q offset correction */
+	//uint32_t count_trig = 0; /* timestamp value in trigger mode corrected for TX start delay */
+	//bool tx_allowed = false;
+	//uint16_t tx_start_delay;
+	//bool tx_notch_enable = false;
+
+	/* check input range (segfault prevention) */
+	if pkt_data.rf_chain >= LGW_RF_CHAIN_NB {
+		return fmt.Errorf("ERROR: INVALID RF_CHAIN TO SEND PACKETS")
+	}
+
+	/* check input variables */
+	if s.rf_tx_enable[pkt_data.rf_chain] == false {
+		return fmt.Errorf("ERROR: SELECTED RF_CHAIN IS DISABLED FOR TX ON SELECTED BOARD")
+	}
+	if s.rf_enable[pkt_data.rf_chain] == false {
+		return fmt.Errorf("ERROR: SELECTED RF_CHAIN IS DISABLED")
+	}
+	if !IS_TX_MODE(pkt_data.tx_mode) {
+		return fmt.Errorf("ERROR: TX_MODE NOT SUPPORTED")
+	}
+	if pkt_data.modulation == MOD_LORA {
+		if !IS_LORA_BW(pkt_data.bandwidth) {
+			return fmt.Errorf("ERROR: BANDWIDTH NOT SUPPORTED BY LORA TX")
+		}
+		if !IS_LORA_STD_DR(byte(pkt_data.datarate)) {
+			return fmt.Errorf("ERROR: DATARATE NOT SUPPORTED BY LORA TX")
+		}
+		if !IS_LORA_CR(pkt_data.coderate) {
+			return fmt.Errorf("ERROR: CODERATE NOT SUPPORTED BY LORA TX")
+		}
+		if pkt_data.size > 255 {
+			return fmt.Errorf("ERROR: PAYLOAD LENGTH TOO BIG FOR LORA TX")
+		}
+	} else if pkt_data.modulation == MOD_FSK {
+		if (pkt_data.f_dev < 1) || (pkt_data.f_dev > 200) {
+			return fmt.Errorf("ERROR: TX FREQUENCY DEVIATION OUT OF ACCEPTABLE RANGE")
+		}
+		if !IS_FSK_DR(int(pkt_data.datarate)) {
+			return fmt.Errorf("ERROR: DATARATE NOT SUPPORTED BY FSK IF CHAIN")
+		}
+		if pkt_data.size > 255 {
+			return fmt.Errorf("ERROR: PAYLOAD LENGTH TOO BIG FOR FSK TX")
+		}
+	} else {
+		return fmt.Errorf("ERROR: INVALID TX MODULATION")
+	}
+
+	/* Enable notch filter for LoRa 125kHz */
+	if (pkt_data.modulation == MOD_LORA) && (pkt_data.bandwidth == BW_125KHZ) {
+		s.tx_notch_enable = true
+	}
+
+	/* Get the TX start delay to be applied for this TX */
+	tx_start_delay := lgw_get_tx_start_delay(s.tx_notch_support, s.tx_notch_enable, s.tx_notch_offset, pkt_data.bandwidth)
+
+	/* interpretation of TX power */
+	for pow_index := s.txgain_lut.size - 1; pow_index > 0; pow_index-- {
+		if s.txgain_lut.lut[pow_index].rf_power <= pkt_data.rf_power {
+			break
+		}
+	}
+	pow_index := 0
+	/* loading TX imbalance correction */
+	target_mix_gain := s.txgain_lut.lut[pow_index].mix_gain
+	if pkt_data.rf_chain == 0 { /* use radio A calibration table */
+		err := Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_OFFSET_I, int32(s.cal_offset_a_i[target_mix_gain-8]))
+		if err != nil {
+			return err
+		}
+		err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_OFFSET_Q, int32(s.cal_offset_a_q[target_mix_gain-8]))
+		if err != nil {
+			return err
+		}
+	} else { /* use radio B calibration table */
+		err := Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_OFFSET_I, int32(s.cal_offset_b_i[target_mix_gain-8]))
+		if err != nil {
+			return err
+		}
+		err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_OFFSET_Q, int32(s.cal_offset_b_q[target_mix_gain-8]))
+		if err != nil {
+			return err
+		}
+	}
+
+	/* Set digital gain from LUT */
+	err := Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_GAIN, int32(s.txgain_lut.lut[pow_index].dig_gain))
+	if err != nil {
+		return err
+	}
+
+	/* fixed metadata, useful payload and misc metadata compositing */
+	transfer_size := TX_METADATA_NB + pkt_data.size /*  */
+	payload_offset := TX_METADATA_NB                /* start the payload just after the metadata */
+
+	part_int := uint32(0)
+	part_frac := uint32(0)
+
+	/* metadata 0 to 2, TX PLL frequency */
+	switch s.rf_radio_type[0] { /* we assume that there is only one radio type on the board */
+	case LGW_RADIO_TYPE_SX1255:
+		part_int = pkt_data.freq_hz / (SX125x_32MHz_FRAC << 7)                               /* integer part, gives the MSB */
+		part_frac = ((pkt_data.freq_hz % (SX125x_32MHz_FRAC << 7)) << 9) / SX125x_32MHz_FRAC /* fractional part, gives middle part and LSB */
+	case LGW_RADIO_TYPE_SX1257:
+		part_int = pkt_data.freq_hz / (SX125x_32MHz_FRAC << 8)                               /* integer part, gives the MSB */
+		part_frac = ((pkt_data.freq_hz % (SX125x_32MHz_FRAC << 8)) << 8) / SX125x_32MHz_FRAC /* fractional part, gives middle part and LSB */
+	default:
+		return fmt.Errorf("ERROR: UNEXPECTED VALUE %d FOR RADIO TYPE", s.rf_radio_type[0])
+	}
+
+	buff[0] = byte(part_int)       /* Most Significant Byte */
+	buff[1] = byte(part_frac >> 8) /* middle byte */
+	buff[2] = byte(part_frac)      /* Least Significant Byte */
+
+	/* metadata 3 to 6, timestamp trigger value */
+	/* TX state machine must be triggered at (T0 - lgw_i_tx_start_delay_us) for packet to start being emitted at T0 */
+	if pkt_data.tx_mode == TIMESTAMPED {
+		count_trig := pkt_data.count_us - uint32(tx_start_delay)
+		buff[3] = byte(count_trig >> 24)
+		buff[4] = byte(count_trig >> 16)
+		buff[5] = byte(count_trig >> 8)
+		buff[6] = byte(count_trig)
+	}
+
+	/* parameters depending on modulation  */
+	if pkt_data.modulation == MOD_LORA {
+		/* metadata 7, modulation type, radio chain selection and TX power */
+		buff[7] = (0x20 & (pkt_data.rf_chain << 5)) | byte(0x0F&pow_index) /* bit 4 is 0 -> LoRa modulation */
+
+		buff[8] = 0 /* metadata 8, not used */
+
+		/* metadata 9, CRC, LoRa CR & SF */
+		switch byte(pkt_data.datarate) {
+		case DR_LORA_SF7:
+			buff[9] = 7
+			break
+		case DR_LORA_SF8:
+			buff[9] = 8
+			break
+		case DR_LORA_SF9:
+			buff[9] = 9
+			break
+		case DR_LORA_SF10:
+			buff[9] = 10
+			break
+		case DR_LORA_SF11:
+			buff[9] = 11
+			break
+		case DR_LORA_SF12:
+			buff[9] = 12
+			break
+		default:
+			log.Printf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT\n", pkt_data.datarate)
+		}
+		switch pkt_data.coderate {
+		case CR_LORA_4_5:
+			buff[9] |= 1 << 4
+			break
+		case CR_LORA_4_6:
+			buff[9] |= 2 << 4
+			break
+		case CR_LORA_4_7:
+			buff[9] |= 3 << 4
+			break
+		case CR_LORA_4_8:
+			buff[9] |= 4 << 4
+			break
+		default:
+			log.Printf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT\n", pkt_data.coderate)
+		}
+		if pkt_data.no_crc == false {
+			buff[9] |= 0x80 /* set 'CRC enable' bit */
+		} else {
+			log.Printf("Info: packet will be sent without CRC\n")
+		}
+
+		/* metadata 10, payload size */
+		buff[10] = byte(pkt_data.size)
+
+		/* metadata 11, implicit header, modulation bandwidth, PPM offset & polarity */
+		switch pkt_data.bandwidth {
+		case BW_125KHZ:
+			buff[11] = 0
+			break
+		case BW_250KHZ:
+			buff[11] = 1
+			break
+		case BW_500KHZ:
+			buff[11] = 2
+			break
+		default:
+			log.Printf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT\n", pkt_data.bandwidth)
+		}
+		if pkt_data.no_header == true {
+			buff[11] |= 0x04 /* set 'implicit header' bit */
+		}
+		if SET_PPM_ON(pkt_data.bandwidth, byte(pkt_data.datarate)) {
+			buff[11] |= 0x08 /* set 'PPM offset' bit at 1 */
+		}
+		if pkt_data.invert_pol == true {
+			buff[11] |= 0x10 /* set 'TX polarity' bit at 1 */
+		}
+
+		/* metadata 12 & 13, LoRa preamble size */
+		if pkt_data.preamble == 0 { /* if not explicit, use recommended LoRa preamble size */
+			pkt_data.preamble = STD_LORA_PREAMBLE
+		} else if pkt_data.preamble < MIN_LORA_PREAMBLE { /* enforce minimum preamble size */
+			pkt_data.preamble = MIN_LORA_PREAMBLE
+			log.Printf("Note: preamble length adjusted to respect minimum LoRa preamble size\n")
+		}
+		buff[12] = byte(pkt_data.preamble >> 8)
+		buff[13] = byte(pkt_data.preamble)
+
+		/* metadata 14 & 15, not used */
+		buff[14] = 0
+		buff[15] = 0
+
+		/* MSB of RF frequency is now used in AGC firmware to implement large/narrow filtering in SX1257/55 */
+		buff[0] &= 0x3F /* Unset 2 MSBs of frequency code */
+		if pkt_data.bandwidth == BW_500KHZ {
+			buff[0] |= 0x80 /* Set MSB bit to enlarge analog filter for 500kHz BW */
+		}
+
+		/* Set MSB-1 bit to enable digital filter if required */
+		if s.tx_notch_enable == true {
+			log.Printf("INFO: Enabling TX notch filter\n")
+			buff[0] |= 0x40
+		}
+	} else if pkt_data.modulation == MOD_FSK {
+		/* metadata 7, modulation type, radio chain selection and TX power */
+		buff[7] = (0x20 & (pkt_data.rf_chain << 5)) | 0x10 | byte(0x0F&pow_index) /* bit 4 is 1 -> FSK modulation */
+
+		buff[8] = 0 /* metadata 8, not used */
+
+		/* metadata 9, frequency deviation */
+		buff[9] = pkt_data.f_dev
+
+		/* metadata 10, payload size */
+		buff[10] = byte(pkt_data.size)
+		/* TODO: how to handle 255 bytes packets ?!? */
+
+		/* metadata 11, packet mode, CRC, encoding */
+		temp := byte(0x02)
+		if pkt_data.no_crc {
+			temp = 0
+		}
+		buff[11] = 0x01 | temp | (0x02 << 2) /* always in variable length packet mode, whitening, and CCITT CRC if CRC is not disabled  */
+
+		/* metadata 12 & 13, FSK preamble size */
+		if pkt_data.preamble == 0 { /* if not explicit, use LoRa MAC preamble size */
+			pkt_data.preamble = STD_FSK_PREAMBLE
+		} else if pkt_data.preamble < MIN_FSK_PREAMBLE { /* enforce minimum preamble size */
+			pkt_data.preamble = MIN_FSK_PREAMBLE
+			log.Printf("Note: preamble length adjusted to respect minimum FSK preamble size\n")
+		}
+		buff[12] = byte(pkt_data.preamble >> 8)
+		buff[13] = byte(pkt_data.preamble)
+
+		/* metadata 14 & 15, FSK baudrate */
+		fsk_dr_div := uint16(uint32(LGW_XTAL_FREQU) / pkt_data.datarate) /* Ok for datarate between 500bps and 250kbps */
+		buff[14] = byte(fsk_dr_div >> 8)
+		buff[15] = byte(fsk_dr_div)
+
+		/* insert payload size in the packet for variable mode */
+		buff[16] = byte(pkt_data.size)
+		transfer_size++  /* one more byte to transfer to the TX modem */
+		payload_offset++ /* start the payload with one more byte of offset */
+
+		/* MSB of RF frequency is now used in AGC firmware to implement large/narrow filtering in SX1257/55 */
+		buff[0] &= 0x7F /* Always use narrow band for FSK (force MSB to 0) */
+
+	} else {
+		return fmt.Errorf("ERROR: INVALID TX MODULATION..")
+	}
+
+	/* Configure TX start delay based on TX notch filter */
+	err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_START_DELAY, int32(tx_start_delay))
+	if err != nil {
+		return err
+	}
+
+	/* copy payload from user struct to buffer containing metadata */
+	copy(buff[payload_offset:], pkt_data.payload[:pkt_data.size])
+	buff = buff[:payload_offset+int(pkt_data.size)]
+	//memcpy((void *)(buff + payload_offset), (void *)(pkt_data.payload), pkt_data.size);
+
+	/* reset TX command flags */
+	err = Lgw_abort_tx(c, spi_mux_mode, spi_mux_target)
+	if err != nil {
+		return err
+	}
+
+	/* put metadata + payload in the TX data buffer */
+	err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_DATA_BUF_ADDR, 0)
+	if err != nil {
+		return err
+	}
+	err = Lgw_reg_wb(c, spi_mux_mode, spi_mux_target, LGW_TX_DATA_BUF_DATA, buff)
+	if err != nil {
+		return err
+	}
+
+	//TODO: LBT
+	//x = lbt_is_channel_free(&pkt_data, tx_start_delay, &tx_allowed)
+	//if x != LGW_LBT_SUCCESS {
+	//	DEBUG_MSG("ERROR: Failed to check channel availability for TX\n")
+	//	return LGW_HAL_ERROR
+	//}
+	//if tx_allowed == true {
+	switch pkt_data.tx_mode {
+	case IMMEDIATE:
+		err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_TRIG_IMMEDIATE, 1)
+		if err != nil {
+			return err
+		}
+		break
+
+	case TIMESTAMPED:
+		err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_TRIG_DELAYED, 1)
+		if err != nil {
+			return err
+		}
+		break
+
+	case ON_GPS:
+		err = Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_TRIG_GPS, 1)
+		if err != nil {
+			return err
+		}
+		break
+
+	default:
+		return fmt.Errorf("ERROR: UNEXPECTED VALUE %d IN SWITCH STATEMENT", pkt_data.tx_mode)
+	}
+	//TODO: LBT
+	//}	 else {
+	//	DEBUG_MSG("ERROR: Cannot send packet, channel is busy (LBT)\n")
+	//	return LGW_LBT_ISSUE
+	//}
+
+	return nil
+}
+
+func Lgw_abort_tx(c *os.File, spi_mux_mode, spi_mux_target byte) error {
+	err := Lgw_reg_w(c, spi_mux_mode, spi_mux_target, LGW_TX_TRIG_ALL, 0)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 //NOTE: completely custom code. Original libloragw have a lot of static fields which store the internal state, all of them are inside this struct
 type State struct {
 	rf_tx_notch_freq  [LGW_RF_CHAIN_NB]uint32
@@ -1636,6 +1997,13 @@ type State struct {
 	txgain_lut Lgw_tx_gain_lut_s
 
 	lbt_enabled bool
+
+	tx_notch_enable bool
+	tx_notch_offset byte
+
+	tx_notch_support      bool
+	spectral_scan_support bool
+	lbt_support           bool
 }
 
 type Config struct {
