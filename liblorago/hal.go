@@ -1963,6 +1963,86 @@ func Lgw_abort_tx(c *os.File, spi_mux_mode, spi_mux_target byte) error {
 	return nil
 }
 
+func Lgw_get_trigcnt(c *os.File, spi_mux_mode, spi_mux_target byte) (uint32, error) {
+	val, err := Lgw_reg_r(c, spi_mux_mode, spi_mux_target, LGW_TIMESTAMP)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(val), nil
+}
+
+func Lgw_time_on_air(packet Lgw_pkt_tx_s, s *State) (uint32, error) {
+	SF := byte(0)
+	BW := uint16(0)
+	Tpacket := uint32(0)
+	//int32_t val;
+	//uint8_t SF, H, DE;
+	//uint16_t BW;
+	//uint32_t payloadSymbNb, Tpacket;
+	//double Tsym, Tpreamble, Tpayload, Tfsk;
+
+	if packet.modulation == MOD_LORA {
+		/* Get bandwidth */
+		val := lgw_bw_getval(packet.bandwidth)
+		if val != -1 {
+			BW = uint16(val / 1E3)
+		} else {
+			return 0, fmt.Errorf("ERROR: Cannot compute time on air for this packet, unsupported bandwidth (0x%X)", packet.bandwidth)
+		}
+
+		/* Get datarate */
+		val = lgw_sf_getval(byte(packet.datarate))
+		if val != -1 {
+			SF = uint8(val)
+		} else {
+			return 0, fmt.Errorf("ERROR: Cannot compute time on air for this packet, unsupported datarate (0x%X)", packet.datarate)
+		}
+
+		/* Duration of 1 symbol */
+		Tsym := math.Pow(2, float64(SF)) / float64(BW)
+
+		/* Duration of preamble */
+		Tpreamble := (float64(packet.preamble) + 4.25) * Tsym
+
+		/* Duration of payload */
+		H := 1
+		if packet.no_header == false {
+			H = 0 /* header is always enabled, except for beacons */
+		}
+		DE := 0
+		if SF >= 11 {
+			DE = 1 /* Low datarate optimization enabled for SF11 and SF12 */
+		}
+		payloadSymbNb := 8 + (math.Ceil((8*float64(packet.size)-4*float64(SF)+28+16-20*float64(H))/(4*(float64(SF)-2*float64(DE)))) * float64(packet.coderate+4)) /* Explicitely cast to double to keep precision of the division */
+
+		Tpayload := payloadSymbNb * Tsym
+
+		/* Duration of packet */
+		Tpacket = uint32(Tpreamble + Tpayload)
+	} else if packet.modulation == MOD_FSK {
+		/* PREAMBLE + SYNC_WORD + PKT_LEN + PKT_PAYLOAD + CRC
+		   PREAMBLE: default 5 bytes
+		   SYNC_WORD: default 3 bytes
+		   PKT_LEN: 1 byte (variable length mode)
+		   PKT_PAYLOAD: x bytes
+		   CRC: 0 or 2 bytes
+		*/
+		temp := float64(2)
+		if packet.no_crc == true {
+			temp = 0
+		}
+		Tfsk := (8 * float64(float64(packet.preamble)+float64(s.fsk_sync_word_size)+1+float64(packet.size)+temp) / float64(packet.datarate)) * 1E3
+
+		/* Duration of packet */
+		Tpacket = uint32(Tfsk) + 1 /* add margin for rounding */
+	} else {
+		Tpacket = 0
+		log.Printf("ERROR: Cannot compute time on air for this packet, unsupported modulation (0x%X)\n", packet.modulation)
+	}
+
+	return Tpacket, nil
+}
+
 //NOTE: completely custom code. Original libloragw have a lot of static fields which store the internal state, all of them are inside this struct
 type State struct {
 	rf_tx_notch_freq  [LGW_RF_CHAIN_NB]uint32
@@ -1996,7 +2076,11 @@ type State struct {
 
 	txgain_lut Lgw_tx_gain_lut_s
 
-	lbt_enabled bool
+	lbt_enable            bool
+	lbt_nb_active_channel uint8
+	lbt_rssi_target_dBm   int8
+	lbt_rssi_offset_dB    int8
+	lbt_channel_cfg       [LBT_CHANNEL_FREQ_NB]Lgw_conf_lbt_chan_s
 
 	tx_notch_enable bool
 	tx_notch_offset byte
@@ -2006,11 +2090,29 @@ type State struct {
 	lbt_support           bool
 }
 
+/**
+@struct lgw_conf_lbt_chan_s
+@brief Configuration structure for LBT channels
+*/
+type Lgw_conf_lbt_chan_s struct {
+	freq_hz      uint32
+	scan_time_us uint16
+}
+
 type Config struct {
 	SX1301Conf struct {
 		LorawanPublic bool `json:"lorawan_public"`
 		Clksrc        byte `json:"clksrc"`
-		Radio0        struct {
+		LbtCfg        struct {
+			Enable     bool `json:"enable"`
+			RssiTarget int  `json:"rssi_target"`
+			ChanCfg    []struct {
+				FreqHz     int `json:"freq_hz"`
+				ScanTimeUs int `json:"scan_time_us"`
+			} `json:"chan_cfg"`
+			Sx127XRssiOffset int `json:"sx127x_rssi_offset"`
+		} `json:"lbt_cfg"`
+		Radio0 struct {
 			Enable     bool    `json:"enable"`
 			Type       string  `json:"type"`
 			Freq       uint32  `json:"freq"`
@@ -2229,5 +2331,13 @@ func ParseConfig(configpath string) (*State, error) {
 	state.fsk_rx_dr = config.SX1301Conf.ChanFSK.Datarate
 	state.fsk_sync_word_size = 3
 	state.fsk_sync_word = 0xC194C1
+	state.lbt_enable = config.SX1301Conf.LbtCfg.Enable
+	state.lbt_nb_active_channel = byte(len(config.SX1301Conf.LbtCfg.ChanCfg))
+	state.lbt_rssi_target_dBm = int8(config.SX1301Conf.LbtCfg.RssiTarget)
+	state.lbt_rssi_offset_dB = int8(config.SX1301Conf.LbtCfg.Sx127XRssiOffset)
+	for i, cfg := range config.SX1301Conf.LbtCfg.ChanCfg {
+		state.lbt_channel_cfg[i].freq_hz = uint32(cfg.FreqHz)
+		state.lbt_channel_cfg[i].scan_time_us = uint16(cfg.ScanTimeUs)
+	}
 	return &state, nil
 }
