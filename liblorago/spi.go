@@ -10,8 +10,6 @@ import (
 )
 
 const (
-	LGW_SPI_SUCCESS = 0
-	LGW_SPI_ERROR   = -1
 	LGW_BURST_CHUNK = 1024
 
 	LGW_SPI_MUX_MODE0 = 0x0 /* No FPGA */
